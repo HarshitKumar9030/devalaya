@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { UserButton } from "@clerk/nextjs";
 import {
   ArrowRight,
   ArrowUpRight,
   CalendarDays,
-  Check,
   ChevronDown,
   Heart,
   MapPin,
@@ -22,6 +22,9 @@ import { AnimatePresence, motion, MotionConfig } from "motion/react";
 import { JourneyMotion } from "./journey-motion";
 import { DesktopNavigation } from "./desktop-navigation";
 import { MobileNavigation, navigation } from "./mobile-navigation";
+import { useSessionGuard } from "./auth/session-provider";
+import { CustomSelect, TextInput } from "./ui/form-controls";
+import { TransactionDialog, type Transaction } from "./transaction-dialog";
 
 function Lotus({ small = false }: { small?: boolean }) {
   return (
@@ -41,32 +44,41 @@ function Lotus({ small = false }: { small?: boolean }) {
   );
 }
 function ClerkAccount() {
-  const { isSignedIn } = useUser();
+  const { isSignedIn, isLoaded, signIn } = useSessionGuard();
   return isSignedIn ? (
     <UserButton />
   ) : (
-    <SignInButton mode="modal">
-      <button className="button primary sign-in">
-        Sign in <ArrowUpRight size={15} />
-      </button>
-    </SignInButton>
+    <button
+      className="button primary sign-in"
+      onClick={signIn}
+      disabled={!isLoaded}
+    >
+      {isLoaded ? "Sign in" : "Loading…"}
+      <ArrowUpRight size={15} />
+    </button>
   );
 }
-type ModalState =
-  | { kind: "booking" | "donation"; temple: Temple }
-  | { kind: "auth" | "bookings" }
-  | null;
 
-export function Devalaya({ authConfigured }: { authConfigured: boolean }) {
+export function Devalaya() {
+  const guard = useSessionGuard();
+  const router = useRouter();
+  const openDashboard = () =>
+    guard.protect(() => router.push("/account/bookings"));
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [region, setRegion] = useState("All locations");
   const [deity, setDeity] = useState("All temples");
   const [showAll, setShowAll] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [modal, setModal] = useState<ModalState>(null);
+  const [modal, setModal] = useState<Transaction | null>(null);
   const [closing, setClosing] = useState(false);
   const [activeNav, setActiveNav] = useState("#discover");
+  useEffect(() => {
+    if (!guard.isSignedIn) {
+      setModal(null);
+      setClosing(false);
+    }
+  }, [guard.isSignedIn]);
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -121,23 +133,11 @@ export function Devalaya({ authConfigured }: { authConfigured: boolean }) {
         </a>
         <DesktopNavigation active={activeNav} onNavigate={setActiveNav} />
         <div className="header-actions">
-          <button
-            className="bookings-button"
-            onClick={() => setModal({ kind: "bookings" })}
-          >
+          <button className="bookings-button" onClick={openDashboard}>
             <Ticket size={17} />
             <span>My bookings</span>
           </button>
-          {authConfigured ? (
-            <ClerkAccount />
-          ) : (
-            <button
-              className="button primary sign-in"
-              onClick={() => setModal({ kind: "auth" })}
-            >
-              Sign in <ArrowUpRight size={15} />
-            </button>
-          )}
+          <ClerkAccount />
           <motion.button
             className="menu-button"
             aria-label="Open navigation"
@@ -155,7 +155,7 @@ export function Devalaya({ authConfigured }: { authConfigured: boolean }) {
           <MobileNavigation
             key="mobile-menu"
             onClose={() => setMobileMenu(false)}
-            onBookings={() => setModal({ kind: "bookings" })}
+            onBookings={openDashboard}
           />
         )}
       </AnimatePresence>
@@ -243,46 +243,45 @@ export function Devalaya({ authConfigured }: { authConfigured: boolean }) {
               setShowAll(true);
             }}
           >
-            <label className="search-input">
-              <Search size={21} />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="A temple, a city, a calling…"
-                aria-label="Search temples"
-              />
-              {query && (
-                <button
-                  type="button"
-                  aria-label="Clear search"
-                  onClick={() => {
-                    setQuery("");
-                    setSearch("");
-                  }}
-                >
-                  <X size={16} />
-                </button>
-              )}
-            </label>
-            <label className="location-select">
-              <MapPin size={19} />
-              <select
-                value={region}
-                onChange={(e) => {
-                  setRegion(e.target.value);
-                  setShowAll(true);
-                }}
-                aria-label="Temple location"
-              >
-                <option>All locations</option>
-                {["North India", "South India", "East India", "West India"].map(
-                  (r) => (
-                    <option key={r}>{r}</option>
-                  ),
-                )}
-              </select>
-              <ChevronDown size={15} />
-            </label>
+            <TextInput
+              className="search-field"
+              icon={<Search size={21} />}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="A temple, a city, a calling…"
+              aria-label="Search temples"
+              trailing={
+                query ? (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    onClick={() => {
+                      setQuery("");
+                      setSearch("");
+                    }}
+                  >
+                    <X size={16} />
+                  </button>
+                ) : undefined
+              }
+            />
+            <CustomSelect
+              compact
+              ariaLabel="Temple location"
+              value={region}
+              onValueChange={(value) => {
+                setRegion(value);
+                setShowAll(true);
+              }}
+              icon={<MapPin size={18} />}
+              options={[
+                "All locations",
+                "North India",
+                "South India",
+                "East India",
+                "West India",
+              ].map((value) => ({ value, label: value }))}
+            />
             <button className="button primary" type="submit">
               Explore temples <ArrowRight size={17} />
             </button>
@@ -342,7 +341,11 @@ export function Devalaya({ authConfigured }: { authConfigured: boolean }) {
                   <p>{t.note}</p>
                   <button
                     className="card-button"
-                    onClick={() => setModal({ kind: "booking", temple: t })}
+                    onClick={() =>
+                      guard.protect(() =>
+                        setModal({ kind: "booking", temple: t }),
+                      )
+                    }
                   >
                     Book darshan <ArrowUpRight size={18} />
                   </button>
@@ -435,7 +438,9 @@ export function Devalaya({ authConfigured }: { authConfigured: boolean }) {
                 <button
                   className="button primary"
                   onClick={() =>
-                    setModal({ kind: "donation", temple: temples[0] })
+                    guard.protect(() =>
+                      setModal({ kind: "donation", temple: temples[0] }),
+                    )
                   }
                 >
                   Find a cause close to your heart <Heart size={16} />
@@ -514,292 +519,13 @@ export function Devalaya({ authConfigured }: { authConfigured: boolean }) {
         <span>© {new Date().getFullYear()} Devalaya</span>
       </footer>
       {modal && (
-        <Modal
-          modal={modal}
+        <TransactionDialog
+          transaction={modal}
           closing={closing}
           close={close}
-          authConfigured={authConfigured}
           onTempleChange={(temple) => setModal({ kind: "donation", temple })}
         />
       )}
     </MotionConfig>
-  );
-}
-
-function Modal({
-  modal,
-  close,
-  closing,
-  authConfigured,
-  onTempleChange,
-}: {
-  modal: NonNullable<ModalState>;
-  close: () => void;
-  closing: boolean;
-  authConfigured: boolean;
-  onTempleChange: (t: Temple) => void;
-}) {
-  const ref = useRef<HTMLDialogElement>(null);
-  const [date, setDate] = useState("");
-  const [time, setTime] = useState("07:00");
-  const [people, setPeople] = useState(1);
-  const [amount, setAmount] = useState(501);
-  const [cause, setCause] = useState("Temple upkeep");
-  const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement;
-    ref.current?.showModal();
-    const old = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = old;
-      previous?.focus();
-    };
-  }, []);
-  const temple = "temple" in modal ? modal.temple : null;
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setMessage("");
-    try {
-      const response = await fetch("/api/intent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          modal.kind === "booking"
-            ? { kind: "booking", templeId: temple?.id, date, time, people }
-            : { kind: "donation", templeId: temple?.id, amount, cause },
-        ),
-      });
-      const result = await response.json();
-      setMessage(result.message || result.error);
-    } catch {
-      setMessage("We couldn’t reach the server. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
-  return (
-    <dialog
-      ref={ref}
-      aria-label={
-        modal.kind === "booking"
-          ? "Plan your darshan"
-          : modal.kind === "donation"
-            ? "Temple donation"
-            : "Your Devalaya account"
-      }
-      className={`modal t-modal ${closing ? "is-closing" : "is-open"}`}
-      onCancel={(e) => {
-        e.preventDefault();
-        close();
-      }}
-      onClick={(e) => {
-        if (e.target === ref.current) close();
-      }}
-    >
-      <div className="modal-content">
-        <button
-          className="modal-close"
-          aria-label="Close dialog"
-          onClick={close}
-        >
-          <X size={20} />
-        </button>
-        <span className="modal-lotus">
-          <Lotus />
-        </span>
-        {modal.kind === "auth" ? (
-          <>
-            <h2>A little closer.</h2>
-            <p>Sign in to keep your temple visits and giving in one place.</p>
-            <div className="setup-note">
-              <ShieldCheck size={24} />
-              <p>
-                Clerk authentication is ready to connect. Add your Clerk keys to{" "}
-                <code>.env.local</code> to enable secure sign-in.
-              </p>
-            </div>
-            <button className="button primary full" onClick={close}>
-              Keep exploring <ArrowRight size={16} />
-            </button>
-          </>
-        ) : modal.kind === "bookings" ? (
-          <>
-            <h2>Your sacred journeys.</h2>
-            <p>Your upcoming darshans will find a home here.</p>
-            <div className="setup-note">
-              <Ticket size={28} />
-              <p>
-                {authConfigured
-                  ? "Sign in to view your booking requests."
-                  : "Sign in will be available once Clerk is connected. Browse temples to plan your first visit."}
-              </p>
-            </div>
-            {authConfigured ? (
-              <SignInButton mode="modal">
-                <button className="button primary full">
-                  Sign in to view bookings
-                </button>
-              </SignInButton>
-            ) : (
-              <button className="button primary full" onClick={close}>
-                Discover your next journey <ArrowRight size={16} />
-              </button>
-            )}
-          </>
-        ) : (
-          <>
-            <h2>
-              {modal.kind === "booking"
-                ? "Make time for the divine."
-                : "A little kindness goes far."}
-            </h2>
-            <p>
-              {modal.kind === "booking"
-                ? temple?.name
-                : "Choose one temple and a cause close to your heart."}
-            </p>
-            <form onSubmit={submit} className="transaction-form">
-              {modal.kind === "donation" ? (
-                <>
-                  <label>
-                    Your temple
-                    <select
-                      value={temple?.id}
-                      onChange={(e) =>
-                        onTempleChange(
-                          temples.find((t) => t.id === e.target.value)!,
-                        )
-                      }
-                    >
-                      {temples.map((t) => (
-                        <option value={t.id} key={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Your intention
-                    <select
-                      value={cause}
-                      onChange={(e) => setCause(e.target.value)}
-                    >
-                      <option>Temple upkeep</option>
-                      <option>Community meals</option>
-                      <option>Local family essentials</option>
-                    </select>
-                  </label>
-                  <label>
-                    Donation amount (₹)
-                    <input
-                      type="number"
-                      min="1"
-                      max="1000000"
-                      required
-                      value={amount}
-                      onChange={(e) => setAmount(Number(e.target.value))}
-                    />
-                  </label>
-                  <div className="amount-options">
-                    {[101, 501, 1001, 2100].map((a) => (
-                      <button
-                        key={a}
-                        type="button"
-                        className={a === amount ? "selected" : ""}
-                        onClick={() => setAmount(a)}
-                      >
-                        ₹{a.toLocaleString("en-IN")}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="privacy-note">
-                    <ShieldCheck size={16} />
-                    Only {temple?.name} manages this donation. Funds are never
-                    pooled across temples.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <label>
-                    Date of visit
-                    <input
-                      type="date"
-                      required
-                      min={new Date().toLocaleDateString("en-CA", {
-                        timeZone: "Asia/Kolkata",
-                      })}
-                      value={date}
-                      onChange={(e) => setDate(e.target.value)}
-                    />
-                  </label>
-                  <div className="form-row">
-                    <label>
-                      Preferred time
-                      <select
-                        value={time}
-                        onChange={(e) => setTime(e.target.value)}
-                      >
-                        {["07:00", "09:00", "11:00", "15:00", "17:00"].map(
-                          (t) => (
-                            <option key={t}>{t}</option>
-                          ),
-                        )}
-                      </select>
-                    </label>
-                    <label>
-                      Devotees
-                      <input
-                        type="number"
-                        min="1"
-                        max="10"
-                        required
-                        value={people}
-                        onChange={(e) => setPeople(Number(e.target.value))}
-                      />
-                    </label>
-                  </div>
-                  <div className="booking-summary">
-                    <span>Illustrative darshan total</span>
-                    <strong>
-                      {temple?.price
-                        ? `₹${(temple.price * people).toLocaleString("en-IN")}`
-                        : "Free darshan"}
-                    </strong>
-                  </div>
-                  <p className="privacy-note">
-                    This is a visit request. Actual temple availability and
-                    payment must be confirmed before a ticket can be issued.
-                  </p>
-                </>
-              )}
-              {message && (
-                <p className="form-message" role="status">
-                  {message}
-                </p>
-              )}
-              <button
-                className="button primary full"
-                disabled={loading}
-                type="submit"
-              >
-                {loading
-                  ? "One moment…"
-                  : modal.kind === "booking"
-                    ? "Request this visit"
-                    : "Save donation intention"}
-                {!loading && <ArrowRight size={17} />}
-              </button>
-              <small className="no-charge">
-                <Check size={12} />
-                No payment is collected in this preview.
-              </small>
-            </form>
-          </>
-        )}
-      </div>
-    </dialog>
   );
 }
